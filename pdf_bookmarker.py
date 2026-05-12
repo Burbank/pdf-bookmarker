@@ -131,6 +131,11 @@ def extract_page_texts(src, max_chars: int = 500) -> list[str]:
 RULES_COMMON = """\
 - Return a JSON array: [{"level": 1, "title": "...", "page": N}, ...]
 - level 1 = major divisions (Parts, Chapters), 2 = sections, 3 = subsections, 4+ = deeper
+- IMPORTANT: When a generic label like "Chapter 1" or "Part II" appears on the same page as a \
+descriptive title (e.g. "God's Purpose and Pattern"), merge them into ONE bookmark using \
+just the number and the descriptive title — drop the word "Chapter". \
+Example: "Chapter 2" + "God's Purpose and Pattern" → "2 God's Purpose and Pattern". \
+Never keep bare "Chapter 1" or "Chapter 2" without the descriptive title
 - Use numbering patterns (1, 1.1, 1.1.1 or I, A, etc.) to confirm hierarchy
 - Clean titles: normalise whitespace, remove trailing dots / dashes / page numbers
 - Discard running headers, footers, page numbers, figure captions
