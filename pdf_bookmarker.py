@@ -434,6 +434,45 @@ def generate_bookmarks(
 # TOC page hyperlinks
 # ---------------------------------------------------------------------------
 
+def _search_title_on_page(page, title: str):
+    """Search for a bookmark title on a page, trying multiple patterns.
+
+    TOC pages often split titles across lines or omit prefixes like
+    "Chapter 1:".  Try the full title first, then the descriptive part
+    without the generic prefix, then shorter fragments.
+    """
+    import re
+
+    candidates: list[str] = []
+
+    # 1. Full title
+    candidates.append(title[:60].strip())
+
+    # 2. Strip generic prefix: "Chapter 1:", "Part II —", "Section 3.", etc.
+    cleaned = re.sub(
+        r'^(chapter|part|section|unit|module|lesson|appendix)\s+[\dIVXivx]+\s*[:.\-—–]?\s*',
+        '', title, flags=re.I,
+    ).strip()
+    if cleaned and len(cleaned) >= 4 and cleaned != title:
+        candidates.append(cleaned[:60])
+
+    # 3. Strip leading number: "1 Why a Kingdom Nation?" → "Why a Kingdom Nation?"
+    no_num = re.sub(r'^\d+[\s.:)\-—–]+', '', title).strip()
+    if no_num and len(no_num) >= 4 and no_num not in candidates:
+        candidates.append(no_num[:60])
+
+    # 4. Shorter fragments of each candidate
+    for c in list(candidates):
+        if len(c) > 25:
+            candidates.append(c[:25].strip())
+
+    for search in candidates:
+        rects = page.search_for(search)
+        if rects:
+            return rects[0]
+    return None
+
+
 def add_toc_links(doc, bookmarks, verbose: bool = False) -> int:
     """Find Contents/TOC pages and add clickable links from each entry to its target page."""
     import fitz
@@ -452,12 +491,9 @@ def add_toc_links(doc, bookmarks, verbose: bool = False) -> int:
             if len(title) < 4 or target_page - 1 == page_idx:
                 continue
 
-            search = title[:60].strip()
-            rects = page.search_for(search)
-            if not rects and len(search) > 20:
-                rects = page.search_for(search[:25].strip())
-            if rects:
-                hits.append((rects[0], target_page))
+            rect = _search_title_on_page(page, title)
+            if rect:
+                hits.append((rect, target_page))
 
         if len(hits) < 3:
             continue
