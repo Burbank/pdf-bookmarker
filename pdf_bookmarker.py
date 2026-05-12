@@ -4,6 +4,7 @@ AI-powered PDF bookmark generator.
 Scans PDF pages, uses AI to identify document structure,
 and writes hierarchical bookmarks (outline/TOC) into the PDF.
 """
+from __future__ import annotations
 
 import sys
 import os
