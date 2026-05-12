@@ -20,6 +20,24 @@ from pathlib import Path
 BATCH_PAGES = 150
 
 
+def _load_dotenv():
+    """Load .env file from the script's directory if it exists."""
+    env_path = Path(__file__).resolve().parent / ".env"
+    if not env_path.is_file():
+        return
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key, value = key.strip(), value.strip().strip("\"'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_dotenv()
+
+
 # ---------------------------------------------------------------------------
 # Text / heading extraction
 # ---------------------------------------------------------------------------
