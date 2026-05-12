@@ -42,11 +42,14 @@ _load_dotenv()
 # Text / heading extraction
 # ---------------------------------------------------------------------------
 
-def extract_heading_candidates(src):
+def extract_heading_candidates(src, include_bold: bool = True):
     """Use font-size analysis to find heading candidates per page.
 
     Returns a list of dicts: [{"page": int, "headings": [{"text", "size", "bold"}]}]
     or None if font metadata is unavailable / uniform.
+
+    When include_bold is False, only lines with a font size strictly larger
+    than the body size are returned (skips bold-at-body-size items).
     """
     import fitz
 
@@ -99,7 +102,7 @@ def extract_heading_candidates(src):
 
                 if max_size > body_size + 0.5:
                     page_items.append({"text": text[:200], "size": round(max_size, 1), "bold": bold})
-                elif bold and max_size >= body_size - 0.5 and len(text) < 100:
+                elif include_bold and bold and max_size >= body_size - 0.5 and len(text) < 100:
                     page_items.append({"text": text[:200], "size": round(max_size, 1), "bold": True})
 
         if page_items:
@@ -363,6 +366,11 @@ def generate_bookmarks(
         sys.exit(1)
 
     src = fitz.open(input_path)
+
+    if src.needs_pass:
+        src.close()
+        raise PermissionError("PDF is password-protected — provide the password to the PDF first")
+
     total = len(src)
 
     if verbose:
@@ -373,19 +381,32 @@ def generate_bookmarks(
         candidates = extract_heading_candidates(src)
         if candidates and len(candidates) >= 2:
             n = sum(len(c["headings"]) for c in candidates)
-            if verbose:
-                print(f"  {n} heading candidates on {len(candidates)} pages (font analysis)", file=sys.stderr)
-            prompt = build_prompt_candidates(candidates, total)
-            if verbose:
-                est = len(prompt) // 4
-                print(f"  Sending ~{est:,} tokens to {provider} ({model or 'default'})…", file=sys.stderr)
-            resp = call_ai(prompt, api_key, provider, model, base_url)
-            bookmarks = parse_bookmarks(resp, total)
-            src.close()
-            bookmarks = collapse_redundant_bookmarks(bookmarks)
-            if verbose:
-                print(f"  → {len(bookmarks)} bookmarks", file=sys.stderr)
-            return bookmarks
+
+            # Too many candidates (e.g. textbooks with heavy bold usage) —
+            # retry with font-size-only, dropping bold-at-body-size items.
+            if n > 500:
+                if verbose:
+                    print(f"  {n} candidates is excessive, retrying without bold text…", file=sys.stderr)
+                candidates = extract_heading_candidates(src, include_bold=False)
+                if candidates:
+                    n = sum(len(c["headings"]) for c in candidates)
+
+            if candidates and len(candidates) >= 2 and n <= 1500:
+                if verbose:
+                    print(f"  {n} heading candidates on {len(candidates)} pages (font analysis)", file=sys.stderr)
+                prompt = build_prompt_candidates(candidates, total)
+                if verbose:
+                    est = len(prompt) // 4
+                    print(f"  Sending ~{est:,} tokens to {provider} ({model or 'default'})…", file=sys.stderr)
+                resp = call_ai(prompt, api_key, provider, model, base_url)
+                bookmarks = parse_bookmarks(resp, total)
+                src.close()
+                bookmarks = collapse_redundant_bookmarks(bookmarks)
+                if verbose:
+                    print(f"  → {len(bookmarks)} bookmarks", file=sys.stderr)
+                return bookmarks
+            elif verbose:
+                print(f"  Still too many candidates ({n}), falling back to text mode…", file=sys.stderr)
         elif verbose:
             print("  Font analysis found too few candidates, falling back to text mode…", file=sys.stderr)
 
