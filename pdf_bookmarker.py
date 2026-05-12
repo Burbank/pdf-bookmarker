@@ -367,6 +367,61 @@ def generate_bookmarks(
 
 
 # ---------------------------------------------------------------------------
+# TOC page hyperlinks
+# ---------------------------------------------------------------------------
+
+def add_toc_links(doc, bookmarks, verbose: bool = False) -> int:
+    """Find Contents/TOC pages and add clickable links from each entry to its target page."""
+    import fitz
+
+    if not bookmarks or len(doc) < 3:
+        return 0
+
+    scan_range = min(25, len(doc))
+    links_added = 0
+
+    for page_idx in range(scan_range):
+        page = doc[page_idx]
+
+        hits: list[tuple[fitz.Rect, int]] = []
+        for _level, title, target_page in bookmarks:
+            if len(title) < 4 or target_page - 1 == page_idx:
+                continue
+
+            search = title[:60].strip()
+            rects = page.search_for(search)
+            if not rects and len(search) > 20:
+                rects = page.search_for(search[:25].strip())
+            if rects:
+                hits.append((rects[0], target_page))
+
+        if len(hits) < 3:
+            continue
+
+        if verbose:
+            print(f"  TOC page {page_idx + 1}: linking {len(hits)} entries", file=sys.stderr)
+
+        pw = page.rect.width
+        for rect, target_page in hits:
+            link_rect = fitz.Rect(
+                page.rect.x0 + 15,
+                rect.y0 - 2,
+                pw - 15,
+                rect.y1 + 2,
+            )
+            page.insert_link({
+                "kind": fitz.LINK_GOTO,
+                "from": link_rect,
+                "page": target_page - 1,
+                "to": fitz.Point(0, 0),
+                "border": [0, 0, 0],
+            })
+            links_added += 1
+
+    return links_added
+
+
+# ---------------------------------------------------------------------------
 # Writer
 # ---------------------------------------------------------------------------
 
@@ -375,6 +430,8 @@ def write_bookmarks(
     bookmarks: list[tuple[int, str, int]],
     in_place: bool = False,
     replace: bool = False,
+    toc_links: bool = True,
+    verbose: bool = False,
 ) -> str | None:
     """Write bookmarks into the PDF. Returns the output path, or None if skipped."""
     try:
@@ -393,6 +450,11 @@ def write_bookmarks(
 
     toc = [[lvl, title, page] for lvl, title, page in bookmarks]
     doc.set_toc(toc)
+
+    if toc_links:
+        n = add_toc_links(doc, bookmarks, verbose=verbose)
+        if verbose and n:
+            print(f"  {n} clickable links added to TOC page(s)", file=sys.stderr)
 
     if in_place:
         try:
@@ -468,6 +530,7 @@ examples:
     parser.add_argument("--in-place", action="store_true", help="modify PDF in place (default: create _bookmarked copy)")
     parser.add_argument("--replace", action="store_true", help="replace existing bookmarks")
     parser.add_argument("--dry-run", action="store_true", help="print bookmarks without writing")
+    parser.add_argument("--no-toc-links", action="store_true", help="skip adding clickable links on Contents pages")
     parser.add_argument("--text-mode", action="store_true", help="skip font analysis, use raw text extraction")
     parser.add_argument("--chars", type=int, default=500, metavar="N", help="max chars per page in text mode (default: 500)")
     parser.add_argument("-v", "--verbose", action="store_true", help="show progress details")
@@ -568,7 +631,13 @@ examples:
                 print()
                 done += 1
             else:
-                out = write_bookmarks(fp, bookmarks, in_place=args.in_place, replace=args.replace)
+                out = write_bookmarks(
+                    fp, bookmarks,
+                    in_place=args.in_place,
+                    replace=args.replace,
+                    toc_links=not args.no_toc_links,
+                    verbose=args.verbose,
+                )
                 if out:
                     print(out)
                     done += 1
