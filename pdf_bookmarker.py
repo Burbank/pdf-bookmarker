@@ -285,6 +285,63 @@ def parse_bookmarks(text: str, max_page: int) -> list[tuple[int, str, int]]:
 
 
 # ---------------------------------------------------------------------------
+# Post-processing
+# ---------------------------------------------------------------------------
+
+def collapse_redundant_bookmarks(bookmarks):
+    """Collapse redundant nested bookmarks that share the same page and similar titles.
+
+    When a parent and child bookmark point to the same page and their titles are
+    similar or the parent is a generic label ("Chapter 3"), merge them into one
+    entry keeping the more descriptive title at the parent's level.
+    Runs iteratively to handle chains of 3+ levels.
+    """
+    import re
+
+    if len(bookmarks) < 2:
+        return bookmarks
+
+    def is_generic(title):
+        return bool(re.match(
+            r'^(chapter|part|section|unit|module|lesson|appendix)\s+[\dIVXivx]+\.?$',
+            title.strip(), re.I,
+        ))
+
+    def titles_similar(a, b):
+        stop = {"the", "a", "an", "of", "and", "for", "in", "to", "on", "at", "by", "is"}
+        aw = {w.lower() for w in re.findall(r'\w{2,}', a)} - stop
+        bw = {w.lower() for w in re.findall(r'\w{2,}', b)} - stop
+        if not aw or not bw:
+            return False
+        return len(aw & bw) / min(len(aw), len(bw)) >= 0.7
+
+    result = list(bookmarks)
+    changed = True
+    while changed:
+        changed = False
+        new_result: list[tuple[int, str, int]] = []
+        skip = set()
+        for i in range(len(result)):
+            if i in skip:
+                continue
+            level, title, page = result[i]
+            if i + 1 < len(result):
+                child_lvl, child_title, child_page = result[i + 1]
+                if (child_lvl > level
+                        and child_page == page
+                        and (is_generic(title) or titles_similar(title, child_title))):
+                    keep = child_title if len(child_title) >= len(title) else title
+                    new_result.append((level, keep, page))
+                    skip.add(i + 1)
+                    changed = True
+                    continue
+            new_result.append((level, title, page))
+        result = new_result
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Orchestrator
 # ---------------------------------------------------------------------------
 
@@ -325,6 +382,7 @@ def generate_bookmarks(
             resp = call_ai(prompt, api_key, provider, model, base_url)
             bookmarks = parse_bookmarks(resp, total)
             src.close()
+            bookmarks = collapse_redundant_bookmarks(bookmarks)
             if verbose:
                 print(f"  → {len(bookmarks)} bookmarks", file=sys.stderr)
             return bookmarks
@@ -366,6 +424,7 @@ def generate_bookmarks(
         if top_level:
             prev_headings = ", ".join(top_level[-5:])
 
+    all_bookmarks = collapse_redundant_bookmarks(all_bookmarks)
     if verbose:
         print(f"  → {len(all_bookmarks)} bookmarks total", file=sys.stderr)
     return all_bookmarks
